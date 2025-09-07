@@ -72,6 +72,12 @@ Start the frontend:
 cd MediMateBot/client
 npm run dev
 ```
+Start Main Frontend:
+```
+cd frontend
+npm run dev
+```
+Open the printed local URL in your browser.<br>
 Authentication:<br>
 Start Backend:
 ```
@@ -79,13 +85,14 @@ cd backend/authServer
 npm run dev
 ```
 Backend of Authentication will run at: http://localhost:5000
+Start backend of main:
+```
+cd backend
+npm start
+```
 
-Start Main Frontend:
-```
-cd frontend
-npm run dev
-```
-Open the printed local URL in your browser.
+
+
 
 
 
