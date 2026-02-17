@@ -12,14 +12,15 @@ function App() {
   const [isTranscribing, setIsTranscribing] = useState(false); // waiting for Gemini
   const [voiceError, setVoiceError] = useState(null);
   const [voiceSupported, setVoiceSupported] = useState(false);
+  const [reportGenerated, setReportGenerated] = useState(false);
 
   const chatEndRef = useRef(null);
   const mediaRecorderRef = useRef(null);  // MediaRecorder instance
   const audioChunksRef = useRef([]);      // raw audio chunks collected while recording
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll to bottom when messages change (no animation so input stays visually fixed)
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    chatEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   }, [messages]);
 
   // Check MediaRecorder support on mount
@@ -33,19 +34,57 @@ function App() {
     const text = typeof textOverride === "string" ? textOverride : input;
     if (!text.trim()) return;
     setInput("");
-    setMessages((m) => [...m, { role: "user", text }]);
+
+    // Include this new turn in the history we send to the backend
+    const newMessages = [...messages, { role: "user", text }];
+    setMessages(newMessages);
 
     try {
       const res = await fetch("http://localhost:8080/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symptoms: text }),
+        body: JSON.stringify({
+          symptoms: text,
+          history: newMessages, // give Gemini memory of the chat so far
+        }),
       });
       const data = await res.json();
-      setMessages((m) => [
-        ...m,
-        { role: "bot", text: data.reply || "No reply from server." },
-      ]);
+      const botMessage = { role: "bot", text: data.reply || "No reply from server." };
+      const finalMessages = [...newMessages, botMessage];
+      setMessages(finalMessages);
+
+      // If the user appears to be ending the conversation, auto-generate a PDF report once.
+      const lower = text.toLowerCase();
+      const isEnding =
+        /\bbye\b/.test(lower) ||
+        lower.includes("thank you") ||
+        lower.includes("thanks");
+
+      if (isEnding && !reportGenerated) {
+        setReportGenerated(true);
+        try {
+          const reportRes = await fetch("http://localhost:8080/report", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ history: finalMessages }),
+          });
+          if (reportRes.ok) {
+            const blob = await reportRes.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `MediMate-Report-${new Date()
+              .toISOString()
+              .slice(0, 10)}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+          }
+        } catch (e) {
+          console.error("Failed to download report:", e);
+        }
+      }
     } catch (err) {
       setMessages((m) => [
         ...m,
@@ -178,6 +217,16 @@ function App() {
         sections[currentKey].push(line.replace(/^[-•*0-9.]+\s*/, "").trim());
       }
     });
+
+    // If we couldn't detect any of the structured sections,
+    // fall back to showing the raw text so general conversation still appears.
+    if (Object.keys(sections).length === 0) {
+      return (
+        <div className="bot-reply" style={{ lineHeight: "1.6" }}>
+          {text}
+        </div>
+      );
+    }
 
     return (
       <div className="bot-reply" style={{ lineHeight: "1.6" }}>
